@@ -103,7 +103,26 @@ void hensel_lift(uint64_t pa, int bits, int32_t n, int32_t m, uint64_t target, s
 } 
 
 void hensel_lift_fast(int32_t n, int32_t m, uint64_t target, std::vector<uint64_t>& results) {
-    // TODO flat no branching thing
+    uint64_t pa = 0;
+    for (int bits = 1; bits <= 48; bits++) {
+        const uint64_t mask = (1ULL << bits) - 1; 
+        const uint64_t pa1 = (pa | (1ULL << bits-1));
+        const uint64_t lhs_0 = (n*pa ^ m*pa) & mask;
+        const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
+        const uint64_t target_masked = target & mask;
+
+        if (lhs_0 == target_masked) {
+            continue; // "add" a 0 bit
+        }
+        else if (lhs_1 == target_masked) {
+            pa = pa1;
+            continue;
+        }
+        else {
+            return;
+        }
+    }
+    results.push_back(pa & MASK_48);
 }
 
 // -------------------------------------------------
@@ -182,13 +201,13 @@ uint64_t modinv(uint64_t value, int bits) {
     return x & ((1ULL << bits) - 1);
 }
 
-uint64_t advance1(uint64_t seed) {
+inline uint64_t advance1(uint64_t seed) {
     return (seed * LCG_A + LCG_B) & MASK_48;
 }
-uint64_t advance2(uint64_t seed) {
+inline uint64_t advance2(uint64_t seed) {
     return (seed * 205749139540585 + 277363943098) & MASK_48;
 }
-uint64_t back2(uint64_t seed) {
+inline uint64_t back2(uint64_t seed) {
     return (seed * 254681119335897 + 120305458776662) & MASK_48;
 }
 
@@ -208,7 +227,8 @@ uint64_t get_carver_seed(uint64_t structure_seed, int32_t x, int32_t z) {
 void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2, std::vector<Result>& results) { 
     // xa ^ (x+d)a = C1 ^ C2 ; 
     std::vector<uint64_t> a_values;
-    hensel_lift(0, 1, x1, x2, carver1 ^ carver2, a_values); 
+    //hensel_lift(0, 1, x1, x2, carver1 ^ carver2, a_values); 
+    hensel_lift_fast(x1, x2, carver1 ^ carver2, a_values);
 
     for (auto a : a_values) {
         uint64_t iseeds[2];
@@ -255,7 +275,8 @@ void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2,
 void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2, std::vector<Result>& results) { 
     // zb ^ (z+d)b = C1 ^ C2 ; 
     std::vector<uint64_t> b_values;
-    hensel_lift(0, 1, z1, z2, carver1 ^ carver2, b_values); 
+    //hensel_lift(0, 1, z1, z2, carver1 ^ carver2, b_values); 
+    hensel_lift_fast(z1, z2, carver1 ^ carver2, b_values);
 
     for (auto b : b_values) {
         uint64_t iseeds[2];
