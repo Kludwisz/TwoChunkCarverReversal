@@ -1,5 +1,4 @@
 #include <cstdio> 
-#include <vector> 
 #include <chrono>
 #include <cmath>
 
@@ -219,7 +218,7 @@ namespace tcr {
         return (x*a ^ z*b ^ structure_seed) & MASK_48;
     }
 
-    void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2, std::vector<Result>& results, bool accurate_lifting = false) { 
+    void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2, std::vector<Result>& results, bool accurate_lifting) { 
         // xa ^ (x+d)a = C1 ^ C2 
         std::vector<uint64_t> a_values;
         if (accurate_lifting) {
@@ -271,7 +270,7 @@ namespace tcr {
     }
 
     // FIXME awful code repetition
-    void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2, std::vector<Result>& results, bool accurate_lifting = false) { 
+    void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2, std::vector<Result>& results, bool accurate_lifting) { 
         // zb ^ (z+d)b = C1 ^ C2 
         std::vector<uint64_t> b_values;
         if (accurate_lifting) {
@@ -323,7 +322,7 @@ namespace tcr {
         } 
     }
 
-    void reverse_carver_seed_pair(uint64_t carver1, uint64_t carver2, int32_t offset_x, int32_t offset_z, std::vector<Result>& results, bool accurate_lifting = false) {
+    void reverse_carver_seed_pair(uint64_t carver1, uint64_t carver2, int32_t offset_x, int32_t offset_z, std::vector<Result>& results, bool accurate_lifting) {
         if (offset_x != 0 && offset_z != 0) {
             printf("Error: can only specify offset on one axis.\n");
         }
@@ -343,6 +342,8 @@ namespace tcr {
         }
     }
 };
+
+#ifdef TEST_TCR
 
 static void test_correctness() { 
     // const uint64_t a = 12845519243672438 & MASK_48; 
@@ -387,17 +388,6 @@ int main() {
 
     test_correctness();
     return 0;
-
-    printf("Demo:\n");
-
-    for (uint64_t c1 = 1; c1 <= 9; c1++) {
-        printf("-- carver1 = %llu\n", c1);
-        for (uint64_t c2 = 1; c2 <= 9; c2++) {
-            std::vector<tcr::Result> results;
-            tcr::reverse_carver_seed_pair(c1, c2, 1, 0, results);
-            for (auto res : results) {
-                printf("Got a result! %llu : x1=%d z1=%d ; x2=%d z2=%d\n", res.structure_seed, res.x, res.z, res.x+1, res.z);
-            }
-        }
-    }
 }
+
+#endif
