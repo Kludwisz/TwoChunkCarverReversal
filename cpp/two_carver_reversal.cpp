@@ -2,6 +2,7 @@
 #include <cstdio> 
 #include <vector> 
 #include <chrono>
+#include <cmath>
 
 // How carver seeding works
 
@@ -46,13 +47,17 @@
 // and we can calculate the mod inverse of b>>p instead, giving
 //      z = (R >> p) * modinv((b >> p), 2**(48-p))  (mod 2**(48-p))
 // 
-// But watch out! This z value is under the reduced modulo, and we're targetting modulo 2**48.
-// Therefore, we get 2**p valid solutions for z, and each of them needs to be checked separately.
+// This z value is under the reduced modulo, and we're targetting modulo 2**48.
+// Therefore, we get 2**p valid solutions for z. Fortunately, since p is usually small, it's
+// sufficient to calculate the z value nearest to 0 under the reduced mod, as it will be the
+// only reasonable candidate under the original mod as well.
 //
 // Finally, we have the value of z mod 2**(48-p), and we can map it back to the actual chunk z coordinate
 // by treating it as a signed U2 value stored on 48-p bits. That gives two valid ranges for z:
 // [0, 1875000] and [2**(48-p) - 1875000, 2**(48-p)). If the z value falls into any of these, we get a result.
-
+//
+// The exact same process can be applied when starting from different z coordinates and the same x coordinate.
+// In that case, the algorithm recovers b first, and calculates x in the final step.
 
 
 struct Result {
@@ -227,23 +232,19 @@ void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2,
             r >>= tz_b;
 
             uint64_t binv = modinv(b, 48-tz_b);
-            int64_t z_value_base = (r * binv) & (mod-1);
+            int64_t z_candidate = static_cast<int64_t>((r * binv) & (mod-1));
+            if (z_candidate >= (mod >> 1)) {
+                z_candidate -= mod; // offset to reduce absolute value
+            }
 
-            for (int k = 0; k < (1<<tz_b); k++) {
-                int64_t z_value = z_value_base + k*mod;
-                if (z_value >= MOD_48 - HALF_CHUNKS) {
-                    z_value -= MOD_48;
-                }
-                if (z_value > static_cast<int64_t>(-HALF_CHUNKS) && z_value < static_cast<int64_t>(HALF_CHUNKS)) {
-                    int32_t z = static_cast<int32_t>(static_cast<int64_t>(z_value));
-                    //printf("Got good z value = %d\n", z);
+            if (std::abs(z_candidate) <= HALF_CHUNKS) {
+                int32_t z = static_cast<int32_t>(z_candidate);
 
-                    // safety check, will likely never fail
-                    uint64_t result_carver1 = a*x1 ^ b*z ^ structure_seed;
-                    uint64_t result_carver2 = a*x2 ^ b*z ^ structure_seed;
-                    if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
-                        results.push_back({structure_seed, x1, z});
-                    }
+                // safety check, will likely never fail
+                uint64_t result_carver1 = a*x1 ^ b*z ^ structure_seed;
+                uint64_t result_carver2 = a*x2 ^ b*z ^ structure_seed;
+                if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
+                    results.push_back({structure_seed, x1, z});
                 }
             }
         }
@@ -252,7 +253,7 @@ void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2,
 
 // FIXME awful code repetition
 void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2, std::vector<Result>& results) { 
-    // xa ^ (x+d)a = C1 ^ C2 ; 
+    // zb ^ (z+d)b = C1 ^ C2 ; 
     std::vector<uint64_t> b_values;
     hensel_lift(0, 1, z1, z2, carver1 ^ carver2, b_values); 
 
@@ -279,23 +280,19 @@ void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2,
             r >>= tz_a;
 
             uint64_t ainv = modinv(a, 48-tz_a);
-            int64_t x_value_base = (r * ainv) & (mod-1);
+            int64_t x_candidate = static_cast<int64_t>((r * ainv) & (mod-1));
+            if (x_candidate >= (mod>>1)) {
+                x_candidate -= mod; // offset to reduce absolute value
+            }
 
-            for (int k = 0; k < (1<<tz_a); k++) {
-                int64_t x_value = x_value_base + k*mod;
-                if (x_value >= MOD_48 - HALF_CHUNKS) {
-                    x_value -= MOD_48;
-                }
-                if (x_value > static_cast<int64_t>(-HALF_CHUNKS) && x_value < static_cast<int64_t>(HALF_CHUNKS)) {
-                    int32_t x = static_cast<int32_t>(x_value);
-                    //printf("Got good z value = %d\n", z);
+            if (std::abs(x_candidate) <= HALF_CHUNKS) {
+                int32_t x = static_cast<int32_t>(x_candidate);
 
-                    // safety check, will likely never fail
-                    uint64_t result_carver1 = a*x ^ b*z1 ^ structure_seed;
-                    uint64_t result_carver2 = a*x ^ b*z2 ^ structure_seed;
-                    if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
-                        results.push_back({structure_seed, x, z1});
-                    }
+                // safety check, will likely never fail
+                uint64_t result_carver1 = a*x ^ b*z1 ^ structure_seed;
+                uint64_t result_carver2 = a*x ^ b*z2 ^ structure_seed;
+                if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
+                    results.push_back({structure_seed, x, z1});
                 }
             }
         }
