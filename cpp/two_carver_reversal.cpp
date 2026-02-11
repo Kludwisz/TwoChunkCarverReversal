@@ -2,7 +2,6 @@
 #include <cstdio> 
 #include <vector> 
 #include <chrono>
-#include <bit> // C++20
 
 // How carver seeding works
 
