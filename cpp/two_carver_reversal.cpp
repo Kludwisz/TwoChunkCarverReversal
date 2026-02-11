@@ -183,6 +183,9 @@ uint64_t advance1(uint64_t seed) {
 uint64_t advance2(uint64_t seed) {
     return (seed * 205749139540585 + 277363943098) & MASK_48;
 }
+uint64_t back2(uint64_t seed) {
+    return (seed * 254681119335897 + 120305458776662) & MASK_48;
+}
 
 int64_t nextLong(uint64_t seed) {
     int64_t high = (advance1(seed) >> 16) << 32;
@@ -247,9 +250,76 @@ void reverse_given_x(uint64_t carver1, uint64_t carver2, int32_t x1, int32_t x2,
     } 
 }
 
-void reverse_carver_seed_pair(uint64_t carver1, uint64_t carver2, int32_t offset_x, std::vector<Result>& results) {
-    for (int32_t x = -HALF_CHUNKS; x <= HALF_CHUNKS; x++) {
-        reverse_given_x(carver1, carver2, x, x+offset_x, results);
+// FIXME awful code repetition
+void reverse_given_z(uint64_t carver1, uint64_t carver2, int32_t z1, int32_t z2, std::vector<Result>& results) { 
+    // xa ^ (x+d)a = C1 ^ C2 ; 
+    std::vector<uint64_t> b_values;
+    hensel_lift(0, 1, z1, z2, carver1 ^ carver2, b_values); 
+
+    for (auto b : b_values) {
+        uint64_t iseeds[2];
+        int iseeds_count = reverse_nextLong(b & MASK_48, iseeds);
+
+        for (int i = 0; i < iseeds_count; i++)  {
+            // if iseed is for x no need to go back
+            uint64_t iseed = iseeds[i];
+            iseed = back2(iseed);
+            uint64_t structure_seed = (iseed ^ LCG_A) & MASK_48;
+            uint64_t iseed_x = iseed;
+
+            uint64_t a = nextLong(iseed_x) & MASK_48;
+            uint64_t r = (carver1 ^ b*z1 ^ structure_seed) & MASK_48;
+            int tz_a = __builtin_ctzll(a);
+            int tz_r = __builtin_ctzll(a);
+            if (tz_a > tz_r) {
+                continue; // can't do modinv
+            }
+            uint64_t mod = 1ULL << 48-tz_a;
+            a >>= tz_a;
+            r >>= tz_a;
+
+            uint64_t ainv = modinv(a, 48-tz_a);
+            int64_t x_value_base = (r * ainv) & (mod-1);
+
+            for (int k = 0; k < (1<<tz_a); k++) {
+                int64_t x_value = x_value_base + k*mod;
+                if (x_value >= MOD_48 - HALF_CHUNKS) {
+                    x_value -= MOD_48;
+                }
+                if (x_value > static_cast<int64_t>(-HALF_CHUNKS) && x_value < static_cast<int64_t>(HALF_CHUNKS)) {
+                    int32_t x = static_cast<int32_t>(x_value);
+                    //printf("Got good z value = %d\n", z);
+
+                    // safety check, will likely never fail
+                    uint64_t result_carver1 = a*x ^ b*z1 ^ structure_seed;
+                    uint64_t result_carver2 = a*x ^ b*z2 ^ structure_seed;
+                    if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
+                        results.push_back({structure_seed, x, z1});
+                    }
+                }
+            }
+        }
+    } 
+}
+
+
+void reverse_carver_seed_pair(uint64_t carver1, uint64_t carver2, int32_t offset_x, int32_t offset_z, std::vector<Result>& results) {
+    if (offset_x != 0 && offset_z != 0) {
+        printf("Error: can only specify offset on one axis.\n");
+    }
+    if (offset_x == 0 && offset_z == 0) {
+        printf("Error: offset must be nonzero.\n");
+    }
+    
+    if (offset_x != 0) {
+        for (int32_t x = -HALF_CHUNKS; x <= HALF_CHUNKS; x++) {
+            reverse_given_x(carver1, carver2, x, x+offset_x, results);
+        }
+    }
+    else if (offset_z != 0) {
+        for (int32_t z = -HALF_CHUNKS; z <= HALF_CHUNKS; z++) {
+            reverse_given_z(carver1, carver2, z, z+offset_z, results);
+        }
     }
 }
 
@@ -261,41 +331,41 @@ void test_correctness() {
     // solve_for_a(x1, x2, xored_carvers); 
 
     uint64_t seed = 42792;
-    int32_t z = 7;
-    int32_t offset_x = 3;
-    int32_t x1 = -4;
-    int32_t x2 = x1 + offset_x;
+    int32_t z = -7;
+    int32_t x = 16;
+    int32_t offx[2] = {-3, 0};
+    int32_t offz[2] = {0, -1};
 
-    uint64_t carver1 = get_carver_seed(seed, x1, z);
-    uint64_t carver2 = get_carver_seed(seed, x2, z);
+    for (int test = 0; test < 2; test++) {
+        int32_t x1 = x;
+        int32_t z1 = z;
+        int32_t x2 = x + offx[test];
+        int32_t z2 = z + offz[test];
 
-    // std::vector<uint64_t> a_values;
-    // mod_lift(0, 1, x1, x2, carver1 ^ carver2, a_values);
-    // for (auto res : a_values) {
-    //     printf("a = %llu\n", res);
-    // }
+        uint64_t carver1 = get_carver_seed(seed, x1, z1);
+        uint64_t carver2 = get_carver_seed(seed, x2, z2);
 
-    // return 0;
+        printf("Starting reversal:  %llu ; %llu  at  %d,%d ; %d,%d\n", carver1, carver2, x1, z1, x2, z2);
+        auto t0 = std::chrono::steady_clock::now();
 
-    printf("Starting reversal:  %llu ; %llu  at  %d,%d ; %d,%d\n", carver1, carver2, x1, z, x2, z);
-    auto t0 = std::chrono::steady_clock::now();
+        std::vector<Result> results;
+        reverse_carver_seed_pair(carver1, carver2, offx[test], offz[test], results);
 
-    std::vector<Result> results;
-    reverse_carver_seed_pair(carver1, carver2, offset_x, results);
+        for (auto res : results) {
+            printf("Got a result! %llu : x=%d z=%d\n", res.structure_seed, res.x, res.z);
+        }
+        auto t1 = std::chrono::steady_clock::now();
 
-    for (auto res : results) {
-        printf("Got a result! %llu : x=%d z=%d\n", res.structure_seed, res.x, res.z);
+        double ms_elapsed = (t1 - t0).count() * 1e-6;
+        printf("Reversal took %f ms\n", ms_elapsed);
     }
-    auto t1 = std::chrono::steady_clock::now();
-
-    double ms_elapsed = (t1 - t0).count() * 1e-6;
-    printf("Reversal took %f ms\n", ms_elapsed);
 }
 
 int main() {
     //printf("%llu %llu\n", get_carver_seed(4382749480380LL, -494824, -1218423), get_carver_seed(4382749480380LL, -494823, -1218423));
 
     test_correctness();
+    return 0;
 
     printf("Demo:\n");
 
@@ -303,7 +373,7 @@ int main() {
         printf("-- carver1 = %llu\n", c1);
         for (uint64_t c2 = 1; c2 <= 9; c2++) {
             std::vector<Result> results;
-            reverse_carver_seed_pair(c1, c2, 1, results);
+            reverse_carver_seed_pair(c1, c2, 1, 0, results);
             for (auto res : results) {
                 printf("Got a result! %llu : x1=%d z1=%d ; x2=%d z2=%d\n", res.structure_seed, res.x, res.z, res.x+1, res.z);
             }
