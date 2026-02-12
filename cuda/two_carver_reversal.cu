@@ -27,13 +27,14 @@ namespace gputcr {
     constexpr uint32_t LCG_B = 11;
     // -------------------------------------------------------
 
+    constexpr uint32_t THREADS_PER_BLOCK = 256;
     constexpr uint32_t MAX_INPUTS_PER_RUN = 512;
     __constant__ uint64_t carver1_vec[MAX_INPUTS_PER_RUN];
     __constant__ uint64_t carver2_vec[MAX_INPUTS_PER_RUN];
 
     constexpr uint32_t MAX_RESULTS_PER_RUN = 64 * 1024;
-    __managed__ Result result_vec[MAX_RESULTS_PER_RUN];
-    __managed__ uint32_t result_count;
+    __managed__ Result managed_result_vec[MAX_RESULTS_PER_RUN];
+    __managed__ uint32_t managed_result_count;
 
     // Hensel lifting for Nx ^ Mx = C
     constexpr uint64_t HENSEL_NO_RESULT = static_cast<uint64_t>(-1LL);
@@ -242,9 +243,9 @@ namespace gputcr {
 
             if (std::abs(z_candidate) <= HALF_CHUNKS) {
                 int32_t z = static_cast<int32_t>(z_candidate);
-                uint32_t idx = atomicAdd(&result_count, 1);
+                uint32_t idx = atomicAdd(&managed_result_count, 1);
                 if (idx < MAX_RESULTS_PER_RUN) {
-                    result_vec[idx] = {structure_seed, x1, z};
+                    managed_result_vec[idx] = {structure_seed, x1, z};
                 }
             }
         }
@@ -292,9 +293,9 @@ namespace gputcr {
 
             if (std::abs(x_candidate) <= HALF_CHUNKS) {
                 int32_t x = static_cast<int32_t>(x_candidate);
-                uint32_t idx = atomicAdd(&result_count, 1);
+                uint32_t idx = atomicAdd(&managed_result_count, 1);
                 if (idx < MAX_RESULTS_PER_RUN) {
-                    result_vec[idx] = {structure_seed, x, z1};
+                    managed_result_vec[idx] = {structure_seed, x, z1};
                 }
             }
         }
@@ -304,9 +305,38 @@ namespace gputcr {
         const ChunkOffset chunk_offset, 
         const uint64_t* data1, uint32_t num_elements_data1,
         const uint64_t* data2, uint32_t num_elements_data2,
-        int device_id, std::vector<Result>& results
+        std::vector<Result>& results
     ) {
+        if (chunk_offset.x != 0 && chunk_offset.z != 0) {
+            return;
+        }
+        if (chunk_offset.x == 0 && chunk_offset.z == 0) {
+            return;
+        }
+        managed_result_count = 0;
+        CUDA_CHECK(cudaMemcpyToSymbol(carver1_vec, (void*)data1, num_elements_data1 * sizeof(uint64_t)));
+        CUDA_CHECK(cudaMemcpyToSymbol(carver2_vec, (void*)data2, num_elements_data2 * sizeof(uint64_t)));
 
+        uint32_t grid_x = (CHUNKS_ON_AXIS + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        dim3 blockConfig(THREADS_PER_BLOCK, 1, 1);
+        dim3 gridConfig(grid_x, num_elements_data1, num_elements_data2);
+
+        if (chunk_offset.x != 0) {
+            two_carver_reversal_kernel_x<<<gridConfig, blockConfig>>>(chunk_offset.x);
+            CUDA_CHECK(cudaGetLastError());
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+        else if (chunk_offset.z != 0) {
+            two_carver_reversal_kernel_z<<<gridConfig, blockConfig>>>(chunk_offset.z);
+            CUDA_CHECK(cudaGetLastError());
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+
+        // read results from managed buffer
+        uint32_t n = managed_result_count;
+        for (uint32_t i = 0; i < n; i++) {
+            results.push_back(managed_result_vec[i]);
+        }
     }
 
     std::vector<Result> reverse_carver_seed_pairs_gpu(
@@ -316,6 +346,7 @@ namespace gputcr {
         int device_id
     ) {
         CUDA_CHECK(cudaSetDevice(device_id));
+        CUDA_CHECK(cudaDeviceSynchronize());
 
         std::vector<Result> combined_results;
 
@@ -336,9 +367,12 @@ namespace gputcr {
                 const uint64_t* data1 = &(carver_seeds_chunk_1.data()[start1]);
                 const uint64_t* data2 = &(carver_seeds_chunk_2.data()[start2]);
 
-                run_kernel(chunk_offset, data1, size1, data2, size2, device_id, combined_results);
+                run_kernel(chunk_offset, data1, size1, data2, size2, combined_results);
             }
         }
+
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaDeviceReset());
 
         return combined_results;
     }
