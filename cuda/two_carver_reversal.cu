@@ -339,16 +339,14 @@ namespace gputcr {
         }
     }
 
-    std::vector<Result> reverse_carver_seed_pairs_gpu(
+    void reverse_carver_seed_pairs_gpu(
         const ChunkOffset chunk_offset,
         const std::vector<uint64_t>& carver_seeds_chunk_1,
         const std::vector<uint64_t>& carver_seeds_chunk_2,
-        int device_id
+        std::vector<Result>& combined_results, int device_id
     ) {
         CUDA_CHECK(cudaSetDevice(device_id));
         CUDA_CHECK(cudaDeviceSynchronize());
-
-        std::vector<Result> combined_results;
 
         const uint32_t s1 = static_cast<uint32_t>(carver_seeds_chunk_1.size());
         const uint32_t s2 = static_cast<uint32_t>(carver_seeds_chunk_2.size());
@@ -373,7 +371,5 @@ namespace gputcr {
 
         CUDA_CHECK(cudaDeviceSynchronize());
         CUDA_CHECK(cudaDeviceReset());
-
-        return combined_results;
     }
 };

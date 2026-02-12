@@ -19,11 +19,11 @@ namespace gputcr {
         int32_t chunk_z;
     };
 
-    std::vector<Result> reverse_carver_seed_pairs_gpu(
+    void reverse_carver_seed_pairs_gpu(
         const ChunkOffset chunk_offset,
         const std::vector<uint64_t>& carver_seeds_chunk_1,
         const std::vector<uint64_t>& carver_seeds_chunk_2,
-        int device_id = 0
+        std::vector<Result>& combined_results, int device_id = 0
     );
 }
 
