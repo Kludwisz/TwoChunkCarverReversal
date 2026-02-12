@@ -4,60 +4,6 @@
 
 #include "two_carver_reversal.hpp"
 
-// How carver seeding works
-
-// Input: seed (the structure seed), x (x coordinate of the chunk), z (z coordinate of the chunk).
-// Output: carver_seed (the carver seed for the given chunk)
-// rand := java.util.Random(seed)
-// a := rand.nextLong()
-// b := rand.nextLong()
-// carver_seed = lower_48_bits_of(a*x ^ b*z ^ seed)
-
-
-// Algorithm explanation
-
-// Let's assume the two carver chunks are at the same z coordinate. We have
-//      ax     ^ bz ^ seed = C1  (mod 2**48)  [C1 = carver seed of first chunk]
-//      a(x+D) ^ bz ^ seed = C2  (mod 2**48)  [C2 = carver seed of second chunk]
-//
-// Xoring the equations:
-//      ax ^ a(x+D) = C1 ^ C2 (mod 2**48)
-// 
-// We can bruteforce all 3.75 million possible values of x. 
-// For each such value we get an equation of the form
-//      Ma ^ Na = C1 ^ C2  (mod 2**48)
-// where a is the only unknown.
-// This can be solved iteratively, by reconstructing a from the lowest bits upwards (see hensel_lift).
-//
-// In carver seeding, a is the value of a Java Random nextLong and can be reversed
-// back to the Java Random internal state using Matthew Bolan's NextLongReverser code.
-// That in turn gives us the structure seed, and all we're missing now is the z coordinate value.
-// 
-// To recover z, let's transform the first carver seed equation:
-//      ax ^ bz ^ seed = C1  (mod 2**48)
-//      bz = ax ^ seed ^ C1  (mod 2**48)
-// Notice that everything on the right-hand-side is already known, let RHS = R.
-//      bz = R  (mod 2**48)
-// 
-// If b is odd, we can directly calculate its inverse modulo 2**48 and multiply both sides by that.
-// Otherwise, we need to eliminate all the factors of 2 first, which is possible if and only if 
-// R has at least as many factors of 2 as b (if it's not possible the current x value yields no results). 
-// Let p be the number of excluded factors of 2. Then:
-//      (b >> p)z = (R >> p)  (mod 2**(48-p))
-// and we can calculate the mod inverse of b>>p instead, giving
-//      z = (R >> p) * modinv((b >> p), 2**(48-p))  (mod 2**(48-p))
-// 
-// This z value is under the reduced modulo, and we're targetting modulo 2**48.
-// Therefore, we get 2**p valid solutions for z. Fortunately, since p is usually small, it's
-// sufficient to calculate the z value nearest to 0 under the reduced mod, as it will be the
-// only reasonable candidate under the original mod as well.
-//
-// Finally, we have the value of z mod 2**(48-p), and we can map it back to the actual chunk z coordinate
-// by treating it as a signed U2 value stored on 48-p bits. That gives two valid ranges for z:
-// [0, 1875000] and [2**(48-p) - 1875000, 2**(48-p)). If the z value falls into any of these, we get a result.
-//
-// The exact same process can be applied when starting from different z coordinates and the same x coordinate.
-// In that case, the algorithm recovers b first, and calculates x in the final step.
 
 namespace tcr {
     constexpr int32_t CHUNKS_ON_AXIS = 60'000'000 / 16;
