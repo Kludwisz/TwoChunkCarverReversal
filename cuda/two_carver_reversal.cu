@@ -10,9 +10,10 @@ static void cuda_error(const char* file, int line_no, const char* msg) {
     exit(1);
 }
 #define CUDA_CHECK(code) do {\
-    cudaError_t cuda_status = code;\
+    code;\
+    cudaError_t cuda_status = cudaGetLastError();\
     if (cuda_status != cudaSuccess) {\
-        cuda_error(__FILE__, __LINE__, cudaGetLastError());\
+        cuda_error(__FILE__, __LINE__, cudaGetErrorName(cuda_status));\
     }\
 } while(0)
 
@@ -26,13 +27,13 @@ namespace gputcr {
     constexpr uint32_t LCG_B = 11;
     // -------------------------------------------------------
 
-    constexpr uint32_t MAX_INPUTS_PER_RUN = 1024;
-    __constant__ uint64_t carver1_vec[MAX_CARVER_INPUTS];
-    __constant__ uint64_t carver2_vec[MAX_CARVER_INPUTS];
+    constexpr uint32_t MAX_INPUTS_PER_RUN = 512;
+    __constant__ uint64_t carver1_vec[MAX_INPUTS_PER_RUN];
+    __constant__ uint64_t carver2_vec[MAX_INPUTS_PER_RUN];
 
-    constexpr uint32_t MAX_RESULTS = 64 * 1024;
-    __managed__ Result result_vec[MAX_RESULTS];
-    __managed__ uin32_t result_count;
+    constexpr uint32_t MAX_RESULTS_PER_RUN = 64 * 1024;
+    __managed__ Result result_vec[MAX_RESULTS_PER_RUN];
+    __managed__ uint32_t result_count;
 
     // Hensel lifting for Nx ^ Mx = C
     constexpr uint64_t HENSEL_NO_RESULT = static_cast<uint64_t>(-1LL);
@@ -44,7 +45,7 @@ namespace gputcr {
             const uint64_t pa1 = (pa | (1U << bits-1));
             const uint64_t lhs_0 = (n*pa ^ m*pa) & mask;
             const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
-            const uint64_t target_masked = target32 & mask;
+            const uint64_t target_masked = target & mask;
 
             if (lhs_0 == target_masked) {
                 continue; // "add" a 0 bit
@@ -242,12 +243,69 @@ namespace gputcr {
             if (std::abs(z_candidate) <= HALF_CHUNKS) {
                 int32_t z = static_cast<int32_t>(z_candidate);
                 uint32_t idx = atomicAdd(&result_count, 1);
-                result_vec[idx] = {structure_seed, x1, z};
+                if (idx < MAX_RESULTS_PER_RUN) {
+                    result_vec[idx] = {structure_seed, x1, z};
+                }
             }
         }
     }
 
     __global__ void two_carver_reversal_kernel_z(const int32_t offset_z) {
+        uint32_t carver1_idx = blockIdx.y; // avoiding modulos and divisions
+        uint32_t carver2_idx = blockIdx.z; 
+        uint64_t carver1 = carver1_vec[carver1_idx];
+        uint64_t carver2 = carver2_vec[carver2_idx];
+        int32_t z1 = blockDim.x * blockIdx.x + threadIdx.x;
+        if (z1 > CHUNKS_ON_AXIS) return;
+        z1 -= HALF_CHUNKS;
+        int32_t z2 = z1 + offset_z;
+        
+        uint64_t b = hensel_lift_gpu_64(z1, z2, carver1^carver2);
+
+        uint64_t iseeds[2];
+        int iseeds_count = reverse_nextLong(b & MASK_48, iseeds);
+
+        #pragma unroll
+        for (int i = 0; i < 2 && i < iseeds_count; i++)  {
+            // iseed is for z, need to go back to the x call starting state
+            uint64_t iseed = iseeds[i];
+            iseed = back2(iseed);
+            uint64_t structure_seed = (iseed ^ LCG_A) & MASK_48;
+            uint64_t iseed_x = iseed;
+
+            uint64_t a = nextLong(iseed_x) & MASK_48;
+            uint64_t r = (carver1 ^ b*z1 ^ structure_seed) & MASK_48;
+            int tz_a = __builtin_ctzll(a);
+            int tz_r = __builtin_ctzll(r);
+            if (tz_a > tz_r) {
+                continue; // can't do modinv
+            }
+            uint64_t mod = 1ULL << 48-tz_a;
+            a >>= tz_a;
+            r >>= tz_a;
+
+            uint64_t ainv = modinv(a, 48-tz_a);
+            int64_t x_candidate = static_cast<int64_t>((r * ainv) & (mod-1));
+            if (x_candidate >= (mod>>1)) {
+                x_candidate -= mod; // offset to reduce absolute value
+            }
+
+            if (std::abs(x_candidate) <= HALF_CHUNKS) {
+                int32_t x = static_cast<int32_t>(x_candidate);
+                uint32_t idx = atomicAdd(&result_count, 1);
+                if (idx < MAX_RESULTS_PER_RUN) {
+                    result_vec[idx] = {structure_seed, x, z1};
+                }
+            }
+        }
+    }
+
+    __host__ static void run_kernel(
+        const ChunkOffset chunk_offset, 
+        const uint64_t* data1, uint32_t num_elements_data1,
+        const uint64_t* data2, uint32_t num_elements_data2,
+        int device_id, std::vector<Result>& results
+    ) {
 
     }
 
@@ -260,5 +318,28 @@ namespace gputcr {
         CUDA_CHECK(cudaSetDevice(device_id));
 
         std::vector<Result> combined_results;
+
+        const uint32_t s1 = static_cast<uint32_t>(carver_seeds_chunk_1.size());
+        const uint32_t s2 = static_cast<uint32_t>(carver_seeds_chunk_2.size());
+        const uint32_t carver1_runs = (s1 + MAX_INPUTS_PER_RUN - 1) / MAX_INPUTS_PER_RUN;
+        const uint32_t carver2_runs = (s2 + MAX_INPUTS_PER_RUN - 1) / MAX_INPUTS_PER_RUN;
+
+        for (uint32_t rc1 = 0; rc1 < carver1_runs; rc1++) {
+            for (uint32_t rc2 = 0; rc2 < carver2_runs; rc2++) {
+                uint32_t start1 = rc1*MAX_INPUTS_PER_RUN;
+                uint32_t end1 = std::min(start1 + rc1, s1);
+                uint32_t size1 = end1 - start1;
+                uint32_t start2 = rc1*MAX_INPUTS_PER_RUN;
+                uint32_t end2 = std::min(start1 + rc1, s1);
+                uint32_t size2 = end2 - start2;
+
+                const uint64_t* data1 = &(carver_seeds_chunk_1.data()[start1]);
+                const uint64_t* data2 = &(carver_seeds_chunk_2.data()[start2]);
+
+                run_kernel(chunk_offset, data1, size1, data2, size2, device_id, combined_results);
+            }
+        }
+
+        return combined_results;
     }
 };
