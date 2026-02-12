@@ -39,7 +39,6 @@ namespace gputcr {
 
     // Hensel lifting for Nx ^ Mx = C
     constexpr uint64_t HENSEL_NO_RESULT = static_cast<uint64_t>(-1LL);
-
     __device__ static uint64_t hensel_lift_gpu_64(int32_t n, int32_t m, uint64_t target) {
         uint64_t pa = 0;
         for (int bits = 1; bits <= 48; bits++) {
@@ -61,51 +60,6 @@ namespace gputcr {
             }
         }
         return pa & MASK_48;
-    }
-
-    // idk this could be faster in theory cause 32-bit int math is faster on GPU
-    // TODO test if thats actually the case
-    __device__ static uint64_t hensel_lift_gpu_32_64(int32_t n, int32_t m, uint64_t target) {
-        uint32_t pa = 0;
-        uint32_t target32 = static_cast<uint32_t>(target & 0xFFFF'FFFF);
-        for (int bits = 1; bits <= 31; bits++) {
-            const uint32_t mask = (1U << bits) - 1; 
-            const uint32_t pa1 = (pa | (1U << bits-1));
-            const uint32_t lhs_0 = (n*pa ^ m*pa) & mask;
-            const uint32_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
-            const uint32_t target_masked = target32 & mask;
-
-            if (lhs_0 == target_masked) {
-                continue; // "add" a 0 bit
-            }
-            else if (lhs_1 == target_masked) {
-                pa = pa1;
-                continue;
-            }
-            else {
-                return HENSEL_NO_RESULT;
-            }
-        }
-        uint64_t epa = static_cast<uint64_t>(pa);
-        for (int bits = 32; bits <= 48; bits++) {
-            const uint64_t mask = (1ULL << bits) - 1; 
-            const uint64_t pa1 = (epa | (1ULL << bits-1));
-            const uint64_t lhs_0 = (n*epa ^ m*epa) & mask;
-            const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
-            const uint64_t target_masked = target & mask;
-
-            if (lhs_0 == target_masked) {
-                continue; // "add" a 0 bit
-            }
-            else if (lhs_1 == target_masked) {
-                epa = pa1;
-                continue;
-            }
-            else {
-                return HENSEL_NO_RESULT;
-            }
-        }
-        return epa & MASK_48;
     }
 
     // ------------------------------------------------------
@@ -190,10 +144,10 @@ namespace gputcr {
         return (seed * LCG_A + LCG_B) & MASK_48;
     }
     __device__ static inline uint64_t advance2(uint64_t seed) {
-        return (seed * 205749139540585 + 277363943098) & MASK_48;
+        return (seed * 205749139540585ULL + 277363943098ULL) & MASK_48;
     }
     __device__ static inline uint64_t back2(uint64_t seed) {
-        return (seed * 254681119335897 + 120305458776662) & MASK_48;
+        return (seed * 254681119335897ULL + 120305458776662ULL) & MASK_48;
     }
     __device__ static inline int64_t nextLong(uint64_t seed) {
         int64_t high = (advance1(seed) >> 16) << 32;
@@ -224,21 +178,14 @@ namespace gputcr {
             // if iseed is for x no need to go back
             uint64_t iseed = iseeds[i];
             uint64_t structure_seed = (iseed ^ LCG_A) & MASK_48;
-            //if (structure_seed == 127457682554596ULL) {
-            //    printf("structseed ok\n");
-            //}
             uint64_t iseed_z = advance2(iseed); // +2
 
             uint64_t b = nextLong(iseed_z) & MASK_48;
             uint64_t r = (carver1 ^ a*x1 ^ structure_seed) & MASK_48;
-            int tz_b = __ffsll(b);
-            int tz_r = __ffsll(r);
-            if (tz_b > tz_r) {
-                continue; // can't do modinv
-            }
+            int tz_b = __ffsll(b) - 1;
             uint64_t mod = 1ULL << 48-tz_b;
             b >>= tz_b;
-            r >>= tz_b;
+            r >>= tz_b; // dont care if it's incorrect
 
             uint64_t binv = modinv(b, 48-tz_b);
             int64_t z_candidate = static_cast<int64_t>((r * binv) & (mod-1));
@@ -286,14 +233,10 @@ namespace gputcr {
 
             uint64_t a = nextLong(iseed_x) & MASK_48;
             uint64_t r = (carver1 ^ b*z1 ^ structure_seed) & MASK_48;
-            int tz_a = __builtin_ctzll(a);
-            int tz_r = __builtin_ctzll(r);
-            if (tz_a > tz_r) {
-                continue; // can't do modinv
-            }
+            int tz_a = __ffsll(a) - 1;
             uint64_t mod = 1ULL << 48-tz_a;
             a >>= tz_a;
-            r >>= tz_a;
+            r >>= tz_a; // dont care if incorrect
 
             uint64_t ainv = modinv(a, 48-tz_a);
             int64_t x_candidate = static_cast<int64_t>((r * ainv) & (mod-1));
