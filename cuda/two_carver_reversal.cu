@@ -1,12 +1,13 @@
 #include "two_carver_reversal.cuh"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
 
 static void cuda_error(const char* file, int line_no, const char* msg) {
-    printf("Line %d, file %s:\nCUDA ERROR - %s\n", file, line_no, msg);
+    printf("Line %d, file %s:\nCUDA ERROR - %s\n", line_no, file, msg);
     exit(1);
 }
 #define CUDA_CHECK(code) do {\
@@ -21,7 +22,7 @@ static void cuda_error(const char* file, int line_no, const char* msg) {
 namespace gputcr {
     constexpr int32_t CHUNKS_ON_AXIS = 60'000'000 / 16;
     constexpr int32_t HALF_CHUNKS = CHUNKS_ON_AXIS / 2;
-    constexpr uint64_t MOD_48 = 1ULL << 48; 
+    //constexpr uint64_t MOD_48 = 1ULL << 48; 
     constexpr uint64_t MASK_48 = (1ULL << 48) - 1; 
     constexpr uint64_t LCG_A = 0x5deece66d;
     constexpr uint32_t LCG_B = 11;
@@ -322,11 +323,13 @@ namespace gputcr {
         dim3 gridConfig(grid_x, num_elements_data1, num_elements_data2);
 
         if (chunk_offset.x != 0) {
+            printf("two_carver_reversal_kernel_x : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
             two_carver_reversal_kernel_x<<<gridConfig, blockConfig>>>(chunk_offset.x);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
         }
         else if (chunk_offset.z != 0) {
+            printf("two_carver_reversal_kernel_z : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
             two_carver_reversal_kernel_z<<<gridConfig, blockConfig>>>(chunk_offset.z);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -355,11 +358,12 @@ namespace gputcr {
 
         for (uint32_t rc1 = 0; rc1 < carver1_runs; rc1++) {
             for (uint32_t rc2 = 0; rc2 < carver2_runs; rc2++) {
+                printf("rc1=%d rc2=%d\n", rc1, rc2);
                 uint32_t start1 = rc1*MAX_INPUTS_PER_RUN;
-                uint32_t end1 = std::min(start1 + rc1, s1);
+                uint32_t end1 = std::min(start1 + MAX_INPUTS_PER_RUN, s1);
                 uint32_t size1 = end1 - start1;
-                uint32_t start2 = rc1*MAX_INPUTS_PER_RUN;
-                uint32_t end2 = std::min(start1 + rc1, s1);
+                uint32_t start2 = rc2*MAX_INPUTS_PER_RUN;
+                uint32_t end2 = std::min(start2 + MAX_INPUTS_PER_RUN, s2);
                 uint32_t size2 = end2 - start2;
 
                 const uint64_t* data1 = &(carver_seeds_chunk_1.data()[start1]);

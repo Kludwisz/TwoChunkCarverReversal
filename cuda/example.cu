@@ -1,6 +1,12 @@
-#include "two_carver_reversal.cuh"
+/*
+compile with:
+nvcc example.cu two_carver_reversal.cu -o example
+run with:
+./example
+*/
 
 #include <cstdio>
+#include "two_carver_reversal.cuh"
 
 
 int main() {
@@ -16,6 +22,6 @@ int main() {
     gputcr::reverse_carver_seed_pairs_gpu(gputcr::ChunkOffset(1, 0), carvers1, carvers2, results);
 
     for (auto& res : results) {
-        printf("seed %lld    at (x1=%d, z1=%d)\n");
+        printf("seed %lld    at (x1=%d, z1=%d)\n", res.structure_seed, res.chunk_x, res.chunk_z);
     }
 }
