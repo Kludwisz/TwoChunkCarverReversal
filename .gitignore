@@ -4,5 +4,7 @@
 *.ptx
 *.cubin
 *.fatbin
+*.lib
+*.exp
 
 *.exe
