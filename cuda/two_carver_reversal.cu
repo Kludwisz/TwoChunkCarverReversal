@@ -43,8 +43,8 @@ namespace gputcr {
     __device__ static uint64_t hensel_lift_gpu_64(int32_t n, int32_t m, uint64_t target) {
         uint64_t pa = 0;
         for (int bits = 1; bits <= 48; bits++) {
-            const uint64_t mask = (1U << bits) - 1; 
-            const uint64_t pa1 = (pa | (1U << bits-1));
+            const uint64_t mask = (1ULL << bits) - 1; 
+            const uint64_t pa1 = (pa | (1ULL << bits-1));
             const uint64_t lhs_0 = (n*pa ^ m*pa) & mask;
             const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
             const uint64_t target_masked = target & mask;
@@ -88,8 +88,8 @@ namespace gputcr {
         }
         uint64_t epa = static_cast<uint64_t>(pa);
         for (int bits = 32; bits <= 48; bits++) {
-            const uint64_t mask = (1U << bits) - 1; 
-            const uint64_t pa1 = (epa | (1U << bits-1));
+            const uint64_t mask = (1ULL << bits) - 1; 
+            const uint64_t pa1 = (epa | (1ULL << bits-1));
             const uint64_t lhs_0 = (n*epa ^ m*epa) & mask;
             const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
             const uint64_t target_masked = target & mask;
@@ -122,7 +122,7 @@ namespace gputcr {
         return q;
     }
 
-    __device__  static inline int reverse_nextLong(uint64_t nextLong_lower48, uint64_t output[]) {
+    __device__ static inline int reverse_nextLong(uint64_t nextLong_lower48, uint64_t output[]) {
         int seedID = 0;
 
         int64_t lowerBits = nextLong_lower48 & 0xffff'ffffULL;
@@ -214,6 +214,7 @@ namespace gputcr {
         int32_t x2 = x1 + offset_x;
         
         uint64_t a = hensel_lift_gpu_64(x1, x2, carver1^carver2);
+        if (a == HENSEL_NO_RESULT) return;
 
         uint64_t iseeds[2];
         int iseeds_count = reverse_nextLong(a & MASK_48, iseeds);
@@ -223,6 +224,9 @@ namespace gputcr {
             // if iseed is for x no need to go back
             uint64_t iseed = iseeds[i];
             uint64_t structure_seed = (iseed ^ LCG_A) & MASK_48;
+            //if (structure_seed == 127457682554596ULL) {
+            //    printf("structseed ok\n");
+            //}
             uint64_t iseed_z = advance2(iseed); // +2
 
             uint64_t b = nextLong(iseed_z) & MASK_48;
@@ -244,9 +248,13 @@ namespace gputcr {
 
             if (std::abs(z_candidate) <= HALF_CHUNKS) {
                 int32_t z = static_cast<int32_t>(z_candidate);
-                uint32_t idx = atomicAdd(&managed_result_count, 1);
-                if (idx < MAX_RESULTS_PER_RUN) {
-                    managed_result_vec[idx] = {structure_seed, x1, z};
+                uint64_t result_carver1 = a*x1 ^ b*z ^ structure_seed;
+                uint64_t result_carver2 = a*x2 ^ b*z ^ structure_seed;
+                if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
+                    uint32_t idx = atomicAdd(&managed_result_count, 1);
+                    if (idx < MAX_RESULTS_PER_RUN) {
+                        managed_result_vec[idx] = {structure_seed, x1, z};
+                    }
                 }
             }
         }
@@ -263,6 +271,7 @@ namespace gputcr {
         int32_t z2 = z1 + offset_z;
         
         uint64_t b = hensel_lift_gpu_64(z1, z2, carver1^carver2);
+        if (b == HENSEL_NO_RESULT) return;
 
         uint64_t iseeds[2];
         int iseeds_count = reverse_nextLong(b & MASK_48, iseeds);
@@ -294,9 +303,14 @@ namespace gputcr {
 
             if (std::abs(x_candidate) <= HALF_CHUNKS) {
                 int32_t x = static_cast<int32_t>(x_candidate);
-                uint32_t idx = atomicAdd(&managed_result_count, 1);
-                if (idx < MAX_RESULTS_PER_RUN) {
-                    managed_result_vec[idx] = {structure_seed, x, z1};
+
+                uint64_t result_carver1 = a*x ^ b*z1 ^ structure_seed;
+                uint64_t result_carver2 = a*x ^ b*z2 ^ structure_seed;
+                if ((result_carver1 & MASK_48) == (carver1 & MASK_48) && (result_carver2 & MASK_48) == (carver2 & MASK_48)) {
+                    uint32_t idx = atomicAdd(&managed_result_count, 1);
+                    if (idx < MAX_RESULTS_PER_RUN) {
+                        managed_result_vec[idx] = {structure_seed, x, z1};
+                    }
                 }
             }
         }

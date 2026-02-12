@@ -22,6 +22,9 @@ int main() {
     gputcr::reverse_carver_seed_pairs_gpu(gputcr::ChunkOffset(1, 0), carvers1, carvers2, results);
 
     for (auto& res : results) {
-        printf("seed %lld    at (x1=%d, z1=%d)\n", res.structure_seed, res.chunk_x, res.chunk_z);
+        printf("seed %lld    at (x=%d, z=%d)\n", res.structure_seed, res.chunk_x, res.chunk_z);
     }
+
+    // Expected output:
+    // seed 127457682554596    at (x=932587, z=1077254)
 }
