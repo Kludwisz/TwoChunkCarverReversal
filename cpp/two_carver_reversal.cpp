@@ -241,7 +241,7 @@ namespace tcr {
                 uint64_t b = nextLong(iseed_z) & MASK_48;
                 uint64_t r = (carver1 ^ a*x1 ^ structure_seed) & MASK_48;
                 int tz_b = __builtin_ctzll(b);
-                int tz_r = __builtin_ctzll(b);
+                int tz_r = __builtin_ctzll(r);
                 if (tz_b > tz_r) {
                     continue; // can't do modinv
                 }
@@ -294,7 +294,7 @@ namespace tcr {
                 uint64_t a = nextLong(iseed_x) & MASK_48;
                 uint64_t r = (carver1 ^ b*z1 ^ structure_seed) & MASK_48;
                 int tz_a = __builtin_ctzll(a);
-                int tz_r = __builtin_ctzll(a);
+                int tz_r = __builtin_ctzll(r);
                 if (tz_a > tz_r) {
                     continue; // can't do modinv
                 }
