@@ -44,7 +44,7 @@ To recover z, let's transform the first carver seed equation:<br>
 Notice that everything on the right-hand-side is already known, let RHS = R.<br>
     `bz = R  (mod 2**48)`
 
-If b is odd, we can directly calculate its inverse modulo 2**48 and multiply both sides by that.
+If b is odd, we can directly calculate its inverse modulo `2**48` and multiply both sides by that.
 Otherwise, we need to eliminate all the factors of 2 first, which is possible if and only if 
 R has at least as many factors of 2 as b (if it's not possible the current x value yields no results). 
 Let p be the number of excluded factors of 2. Then:<br>
@@ -52,8 +52,8 @@ Let p be the number of excluded factors of 2. Then:<br>
 and we can calculate the mod inverse of b>>p instead, giving<br>
     `z = (R >> p) * modinv((b >> p), 2**(48-p))  (mod 2**(48-p))`
 
-This z value is under the reduced modulo, and we're targetting modulo 2**48.
-Therefore, we get 2**p valid solutions for z. Fortunately, since p is usually small, it's
+This z value is under the reduced modulo, and we're targetting modulo `2**48`.
+Therefore, we get `2**p` valid solutions for z. Fortunately, since p is usually small, it's
 sufficient to calculate the z value nearest to 0 under the reduced mod, as it will be the
 only reasonable candidate under the original mod as well. If the candidate falls within the range of Minecraft chunk coordinates, we get a result.
 
