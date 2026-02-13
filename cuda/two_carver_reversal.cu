@@ -32,32 +32,22 @@ namespace gputcr {
     constexpr uint32_t MAX_INPUTS_PER_RUN = 512;
     __constant__ uint64_t carver1_vec[MAX_INPUTS_PER_RUN];
     __constant__ uint64_t carver2_vec[MAX_INPUTS_PER_RUN];
+    __constant__ int32_t full_offset_xz;
 
     constexpr uint32_t MAX_RESULTS_PER_RUN = 64 * 1024;
     __managed__ Result managed_result_vec[MAX_RESULTS_PER_RUN];
     __managed__ uint32_t managed_result_count;
 
     // Hensel lifting for Nx ^ Mx = C
-    constexpr uint64_t HENSEL_NO_RESULT = static_cast<uint64_t>(-1LL);
-    __device__ static uint64_t hensel_lift_gpu_64(int32_t n, int32_t m, uint64_t target) {
+    __device__ static uint64_t hensel_lift_gpu_64_fast(int32_t n, int32_t m, uint64_t target) {
+        
         uint64_t pa = 0;
         for (int bits = 1; bits <= 48; bits++) {
             const uint64_t mask = (1ULL << bits) - 1; 
-            const uint64_t pa1 = (pa | (1ULL << bits-1));
             const uint64_t lhs_0 = (n*pa ^ m*pa) & mask;
-            const uint64_t lhs_1 = (n*pa1 ^ m*pa1) & mask; 
-            const uint64_t target_masked = target & mask;
-
-            if (lhs_0 == target_masked) {
-                continue; // "add" a 0 bit
-            }
-            else if (lhs_1 == target_masked) {
-                pa = pa1;
-                continue;
-            }
-            else {
-                return HENSEL_NO_RESULT;
-            }
+            pa |= (lhs_0 == (target & mask) ? 0 : (1ULL << bits-1));
+            // not checking the other branch at all - makes this incorrect in many cases but keeps
+            // the correct results and seems to be 
         }
         return pa & MASK_48;
     }
@@ -157,18 +147,14 @@ namespace gputcr {
 
     // ------------------------------------------------------
 
-    __global__ void two_carver_reversal_kernel_x(const int32_t offset_x) {
-        uint32_t carver1_idx = blockIdx.y; // avoiding modulos and divisions
-        uint32_t carver2_idx = blockIdx.z; 
-        uint64_t carver1 = carver1_vec[carver1_idx];
-        uint64_t carver2 = carver2_vec[carver2_idx];
-        int32_t x1 = blockDim.x * blockIdx.x + threadIdx.x;
-        if (x1 > CHUNKS_ON_AXIS) return;
-        x1 -= HALF_CHUNKS;
-        int32_t x2 = x1 + offset_x;
+    __global__ void two_carver_reversal_kernel_x() {
+        const int32_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+        const uint64_t carver1 = carver1_vec[blockIdx.y];
+        const uint64_t carver2 = carver2_vec[blockIdx.z];
+        const int32_t x1 = tid - HALF_CHUNKS;
+        const int32_t x2 = tid + full_offset_xz;
         
-        uint64_t a = hensel_lift_gpu_64(x1, x2, carver1^carver2);
-        if (a == HENSEL_NO_RESULT) return;
+        uint64_t a = hensel_lift_gpu_64_fast(x1, x2, carver1^carver2);
 
         uint64_t iseeds[2];
         int iseeds_count = reverse_nextLong(a & MASK_48, iseeds);
@@ -207,18 +193,14 @@ namespace gputcr {
         }
     }
 
-    __global__ void two_carver_reversal_kernel_z(const int32_t offset_z) {
-        uint32_t carver1_idx = blockIdx.y; // avoiding modulos and divisions
-        uint32_t carver2_idx = blockIdx.z; 
-        uint64_t carver1 = carver1_vec[carver1_idx];
-        uint64_t carver2 = carver2_vec[carver2_idx];
-        int32_t z1 = blockDim.x * blockIdx.x + threadIdx.x;
-        if (z1 > CHUNKS_ON_AXIS) return;
-        z1 -= HALF_CHUNKS;
-        int32_t z2 = z1 + offset_z;
+    __global__ void two_carver_reversal_kernel_z() {
+        const int32_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+        const uint64_t carver1 = carver1_vec[blockIdx.y];
+        const uint64_t carver2 = carver2_vec[blockIdx.z];
+        const int32_t z1 = tid - HALF_CHUNKS;
+        const int32_t z2 = tid + full_offset_xz;
         
-        uint64_t b = hensel_lift_gpu_64(z1, z2, carver1^carver2);
-        if (b == HENSEL_NO_RESULT) return;
+        uint64_t b = hensel_lift_gpu_64_fast(z1, z2, carver1^carver2);
 
         uint64_t iseeds[2];
         int iseeds_count = reverse_nextLong(b & MASK_48, iseeds);
@@ -281,13 +263,13 @@ namespace gputcr {
 
         if (chunk_offset.x != 0) {
             printf("two_carver_reversal_kernel_x : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
-            two_carver_reversal_kernel_x<<<gridConfig, blockConfig>>>(chunk_offset.x);
+            two_carver_reversal_kernel_x<<<gridConfig, blockConfig>>>();
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
         }
         else if (chunk_offset.z != 0) {
             printf("two_carver_reversal_kernel_z : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
-            two_carver_reversal_kernel_z<<<gridConfig, blockConfig>>>(chunk_offset.z);
+            two_carver_reversal_kernel_z<<<gridConfig, blockConfig>>>();
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
         }
@@ -307,6 +289,15 @@ namespace gputcr {
     ) {
         CUDA_CHECK(cudaSetDevice(device_id));
         CUDA_CHECK(cudaDeviceSynchronize());
+
+        if (chunk_offset.x != 0) {
+            int32_t real_offset = chunk_offset.x - HALF_CHUNKS;
+            CUDA_CHECK(cudaMemcpyToSymbol(full_offset_xz, (void*)(&real_offset), sizeof(int32_t)));
+        }
+        else if (chunk_offset.z != 0) {
+            int32_t real_offset = chunk_offset.z - HALF_CHUNKS;
+            CUDA_CHECK(cudaMemcpyToSymbol(full_offset_xz, (void*)(&real_offset), sizeof(int32_t)));
+        }
 
         const uint32_t s1 = static_cast<uint32_t>(carver_seeds_chunk_1.size());
         const uint32_t s2 = static_cast<uint32_t>(carver_seeds_chunk_2.size());

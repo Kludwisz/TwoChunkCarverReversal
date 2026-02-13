@@ -14,7 +14,7 @@ int main() {
     const int base = 420420;
     std::vector<uint64_t> carvers1;
     std::vector<uint64_t> carvers2;
-    for (uint64_t c = base; c <= base+20; c++) {
+    for (uint64_t c = base; c <= base+100; c++) {
         carvers1.push_back(c);
         carvers2.push_back(c);
     }
