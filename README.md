@@ -1,5 +1,5 @@
 # Two-Chunk Carver Reversal
-This repository contains code for reversing a pair of carver seeds and the desired offset between the two chunks (on a single axis, either x or z) into a list of world seeds and coordinates at which such carver seeds can be found.
+This repository contains code for reversing a pair of carver seeds and the desired offset between the two chunks (on a single axis, either x or z) into a list of world seeds and coordinates at which such carver seeds can be found. The code is available in two variants - written in C++ for CPU-only usage (see folder `cpp`), and in CUDA/C++ for CPU-GPU usage (see `cuda`). The CUDA version is highly recommended for large inputs.
 
 ### What are carver seeds?
 Carver seeds are special kinds of 48-bit Java Random seeds that Minecraft calculates for every single chunk in the game, based of the world seed and the chunk's coordinates. Carver seeds determine the layouts of most structures that may happen to spawn in a chunk, as well as the shapes of any caves or ravines spawning in the chunk.
@@ -17,10 +17,9 @@ Let's say you want to find a seed and set of chunk coordinates (x,z) where two c
 - the chunk at (x, z) has a carver seed of your choice, for example `12345`
 - the chunk at (x+N, z) or (x, z+N), where N is an integer constant of your choice, also has a carver seed of your choice, for example `54321`
 
-The code lets you find triples of the form (seed, x, z) that satisfy both conditions at once.
+The code lets you find triples of the form (seed, x, z) that satisfy both conditions at once. 
 
 ### How does it work?
-
 Let's assume the two carver chunks are at the same z coordinate. We have <br>
     `ax     ^ bz ^ seed = C1  (mod 2**48)  [C1 = carver seed of first chunk]`<br>
     `a(x+D) ^ bz ^ seed = C2  (mod 2**48)  [C2 = carver seed of second chunk]`
