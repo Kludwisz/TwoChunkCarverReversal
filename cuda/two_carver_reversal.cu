@@ -262,13 +262,13 @@ namespace gputcr {
         dim3 gridConfig(grid_x, num_elements_data1, num_elements_data2);
 
         if (chunk_offset.x != 0) {
-            printf("two_carver_reversal_kernel_x : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
+            //printf("two_carver_reversal_kernel_x : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
             two_carver_reversal_kernel_x<<<gridConfig, blockConfig>>>();
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
         }
         else if (chunk_offset.z != 0) {
-            printf("two_carver_reversal_kernel_z : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
+            //printf("two_carver_reversal_kernel_z : grid_x=%u, grid_y=%u, grid_z=%u\n", gridConfig.x, gridConfig.y, gridConfig.z);
             two_carver_reversal_kernel_z<<<gridConfig, blockConfig>>>();
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -306,7 +306,7 @@ namespace gputcr {
 
         for (uint32_t rc1 = 0; rc1 < carver1_runs; rc1++) {
             for (uint32_t rc2 = 0; rc2 < carver2_runs; rc2++) {
-                printf("rc1=%d rc2=%d\n", rc1, rc2);
+                //printf("rc1=%d rc2=%d\n", rc1, rc2);
                 uint32_t start1 = rc1*MAX_INPUTS_PER_RUN;
                 uint32_t end1 = std::min(start1 + MAX_INPUTS_PER_RUN, s1);
                 uint32_t size1 = end1 - start1;
